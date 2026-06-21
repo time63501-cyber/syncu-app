@@ -1,0 +1,55 @@
+name: Build Android APK
+
+# This triggers the build whenever you push to main, or manually via a button
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build APK
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Grab your code
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # 2. Set up the web environment
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # 3. Build the SvelteKit App
+      - name: Install Web Dependencies
+        run: npm install
+
+      - name: Build SvelteKit (Static)
+        run: npm run build
+
+      # 4. Sync web code to Android folder
+      - name: Sync Capacitor
+        run: npx cap sync android
+
+      # 5. Set up the Android build environment
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      # 6. Compile the APK
+      - name: Build Debug APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      # 7. Upload the finished APK so you can download it
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: SyncU-App-Debug
+          path: android/app/build/outputs/apk/debug/app-debug.apk
