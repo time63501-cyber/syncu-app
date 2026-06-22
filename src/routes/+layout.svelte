@@ -1,31 +1,30 @@
-<script lang="ts">
+<script>
 	import '../app.css';
 	import { isPlaying, currentSong, playlistQueue, currentTrackIndex } from '$lib/stores';
 	import { NativeAudio } from '@capgo/native-audio';
-	// MediaSession is imported but NativeAudio handles the core background task
 	import { MediaSession } from '@capgo/capacitor-media-session';
-	import { onMount, onDestroy } from 'svelte';
+	import { onDestroy } from 'svelte';
 
 	let { children } = $props();
 
 	let currentTime = $state(0);
 	let duration = $state(0);
 	let isFullScreen = $state(false);
-	let timeInterval: any;
+	let timeInterval;
 
 	// 1. Initialize the Native Plugin
 	$effect(() => {
 		const initAudio = async () => {
 			await NativeAudio.configure({
 				showNotification: true,
-				background: true
+				backgroundPlayback: true // Fixed flag for background audio
 			});
 		};
 		initAudio();
 	});
 
-	// 2. The Core Playback Engine
-	async function playNativeTrack(track: any) {
+	// 2. The Core Playback Engine (No TS Types here!)
+	async function playNativeTrack(track) {
 		if (!track || !track.audioUrl) return;
 
 		try {
@@ -58,15 +57,10 @@
 	}
 
 	// 3. Watch for Song Changes
-	// This replaces the old audio bind:src logic
 	$effect(() => {
-		const initAudio = async () => {
-			await NativeAudio.configure({
-				showNotification: true,
-				backgroundPlayback: true // FIXED: Updated flag name
-			});
-		};
-		initAudio();
+		if ($currentSong) {
+			playNativeTrack($currentSong);
+		}
 	});
 
 	// 4. Progress Bar Syncing
@@ -91,8 +85,8 @@
 		clearInterval(timeInterval);
 	});
 
-	// 5. Rewired UI Controls
-	async function togglePlay(e?: Event) {
+	// 5. Rewired UI Controls (No TS Types!)
+	async function togglePlay(e) {
 		if (e) e.stopPropagation();
 		
 		try {
@@ -107,10 +101,11 @@
 		}
 	}
 
-	async function skipTime(seconds: number, e?: Event) {
+	async function skipTime(seconds, e) {
 		if (e) e.stopPropagation();
 		try {
 			const newTime = Math.max(0, Math.min(currentTime + seconds, duration));
+			// Fixed to setCurrentTime instead of seek
 			await NativeAudio.setCurrentTime({ assetId: 'currentTrack', time: newTime });
 			currentTime = newTime;
 		} catch (error) {
@@ -118,7 +113,7 @@
 		}
 	}
 
-	function playNext(e?: Event) {
+	function playNext(e) {
 		if (e) e.stopPropagation();
 		if ($playlistQueue && $playlistQueue.length > 0) {
 			let nextIndex = $currentTrackIndex + 1;
@@ -136,7 +131,7 @@
 		}
 	}
 
-	function playPrevious(e?: Event) {
+	function playPrevious(e) {
 		if (e) e.stopPropagation();
 		if ($playlistQueue && $playlistQueue.length > 0) {
 			if (currentTime > 3) {
@@ -159,7 +154,7 @@
 		}
 	}
 
-	function formatTime(seconds: number) {
+	function formatTime(seconds) {
 		if (isNaN(seconds)) return '0:00';
 		const m = Math.floor(seconds / 60);
 		const s = Math.floor(seconds % 60);
