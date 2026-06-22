@@ -1,31 +1,30 @@
-<script lang="ts">
+<script>
 	import { currentMood } from '$lib/stores';
 
-	// State for the conversational UI
-	let step = 1;
-	let answers = {
+	// Updated to use $state
+	let step = $state(1);
+	let answers = $state({
 		activity: "",
 		atmosphere: "",
 		preference: ""
-	};
+	});
 
-	function selectActivity(activity: string) {
+	/** @param {string} activity */
+	function selectActivity(activity) {
 		answers.activity = activity;
 		step = 2;
 	}
 
-	function selectAtmosphere(atmosphere: string) {
+	/** @param {string} atmosphere */
+	function selectAtmosphere(atmosphere) {
 		answers.atmosphere = atmosphere;
 		step = 3;
 	}
 
-	function finishProfiling(preference: string) {
+	/** @param {string} preference */
+	function finishProfiling(preference) {
 		answers.preference = preference;
-		// Update the global store based on their answers
 		$currentMood = `${answers.activity} + ${answers.atmosphere}`;
-		// In a real app, we would send 'answers' to our Python backend here
-		
-		// Return to home dashboard
 		window.location.href = '/'; 
 	}
 </script>
@@ -42,15 +41,15 @@
 			<p class="text-zinc-400 mb-10 text-sm">Let's find the right rhythm for your current task.</p>
 			
 			<div class="flex flex-col gap-3">
-				<button on:click={() => selectActivity("Deep Work")} class="p-4 rounded-xl border border-zinc-800 bg-zinc-900/50 hover:bg-zinc-800 transition active:scale-95 text-left flex items-center justify-between group">
+				<button onclick={() => selectActivity("Deep Work")} class="p-4 rounded-xl border border-zinc-800 bg-zinc-900/50 hover:bg-zinc-800 transition active:scale-95 text-left flex items-center justify-between group">
 					<span class="font-medium">Deep Work & Study</span>
 					<span class="text-xl opacity-50 group-hover:opacity-100 transition">🧠</span>
 				</button>
-				<button on:click={() => selectActivity("Relaxing")} class="p-4 rounded-xl border border-zinc-800 bg-zinc-900/50 hover:bg-zinc-800 transition active:scale-95 text-left flex items-center justify-between group">
+				<button onclick={() => selectActivity("Relaxing")} class="p-4 rounded-xl border border-zinc-800 bg-zinc-900/50 hover:bg-zinc-800 transition active:scale-95 text-left flex items-center justify-between group">
 					<span class="font-medium">Just Relaxing</span>
 					<span class="text-xl opacity-50 group-hover:opacity-100 transition">☕</span>
 				</button>
-				<button on:click={() => selectActivity("Moving")} class="p-4 rounded-xl border border-zinc-800 bg-zinc-900/50 hover:bg-zinc-800 transition active:scale-95 text-left flex items-center justify-between group">
+				<button onclick={() => selectActivity("Moving")} class="p-4 rounded-xl border border-zinc-800 bg-zinc-900/50 hover:bg-zinc-800 transition active:scale-95 text-left flex items-center justify-between group">
 					<span class="font-medium">Commuting or Walking</span>
 					<span class="text-xl opacity-50 group-hover:opacity-100 transition">🚶‍♂️</span>
 				</button>
@@ -64,15 +63,15 @@
 			<p class="text-zinc-400 mb-10 text-sm">Syncing the soundscape to your environment.</p>
 			
 			<div class="grid grid-cols-2 gap-3">
-				<button on:click={() => selectAtmosphere("Bright")} class="p-6 rounded-xl border border-zinc-800 bg-zinc-900/50 hover:bg-zinc-800 transition active:scale-95 flex flex-col items-center gap-2">
+				<button onclick={() => selectAtmosphere("Bright")} class="p-6 rounded-xl border border-zinc-800 bg-zinc-900/50 hover:bg-zinc-800 transition active:scale-95 flex flex-col items-center gap-2">
 					<span class="text-3xl">☀️</span>
 					<span class="font-medium text-sm">Bright & Clear</span>
 				</button>
-				<button on:click={() => selectAtmosphere("Rainy")} class="p-6 rounded-xl border border-zinc-800 bg-zinc-900/50 hover:bg-zinc-800 transition active:scale-95 flex flex-col items-center gap-2">
+				<button onclick={() => selectAtmosphere("Rainy")} class="p-6 rounded-xl border border-zinc-800 bg-zinc-900/50 hover:bg-zinc-800 transition active:scale-95 flex flex-col items-center gap-2">
 					<span class="text-3xl">🌧️</span>
 					<span class="font-medium text-sm">Overcast / Raining</span>
 				</button>
-				<button on:click={() => selectAtmosphere("Night")} class="col-span-2 p-6 rounded-xl border border-zinc-800 bg-zinc-900/50 hover:bg-zinc-800 transition active:scale-95 flex flex-col items-center gap-2">
+				<button onclick={() => selectAtmosphere("Night")} class="col-span-2 p-6 rounded-xl border border-zinc-800 bg-zinc-900/50 hover:bg-zinc-800 transition active:scale-95 flex flex-col items-center gap-2">
 					<span class="text-3xl">🌙</span>
 					<span class="font-medium text-sm">Late Night</span>
 				</button>
@@ -86,10 +85,10 @@
 			<p class="text-zinc-400 mb-10 text-sm">Do you prefer lyrics right now, or purely instrumental?</p>
 			
 			<div class="flex flex-col gap-3">
-				<button on:click={() => finishProfiling("Vocal")} class="p-4 rounded-xl border border-zinc-800 bg-zinc-900/50 hover:bg-zinc-800 transition active:scale-95 text-center font-medium">
+				<button onclick={() => finishProfiling("Vocal")} class="p-4 rounded-xl border border-zinc-800 bg-zinc-900/50 hover:bg-zinc-800 transition active:scale-95 text-center font-medium">
 					I want to hear voices
 				</button>
-				<button on:click={() => finishProfiling("Instrumental")} class="p-4 rounded-xl border border-zinc-800 bg-zinc-900/50 hover:bg-zinc-800 transition active:scale-95 text-center font-medium">
+				<button onclick={() => finishProfiling("Instrumental")} class="p-4 rounded-xl border border-zinc-800 bg-zinc-900/50 hover:bg-zinc-800 transition active:scale-95 text-center font-medium">
 					Keep it instrumental
 				</button>
 			</div>
