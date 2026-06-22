@@ -1,220 +1,274 @@
-<script>
+<script lang="ts">
 	import '../app.css';
 	import { isPlaying, currentSong, playlistQueue, currentTrackIndex } from '$lib/stores';
+	import { NativeAudio } from '@capgo/native-audio';
+	// MediaSession is imported but NativeAudio handles the core background task
+	import { MediaSession } from '@capgo/capacitor-media-session';
+	import { onMount, onDestroy } from 'svelte';
 
 	let { children } = $props();
 
-	/** @type {HTMLAudioElement | null} */
-	let audioElement = null;
 	let currentTime = $state(0);
 	let duration = $state(0);
 	let isFullScreen = $state(false);
+	let timeInterval: any;
 
-	/** @param {unknown} err */
-	function logAutoplayError(err) {
-		console.log('Autoplay blocked:', err);
-	}
-
+	// 1. Initialize the Native Plugin
 	$effect(() => {
-		const audioUrl = $currentSong?.audioUrl;
-		const shouldPlay = $isPlaying;
-
-		if (!audioElement || !audioUrl) return;
-
-		if (shouldPlay) {
-			const timeout = setTimeout(() => {
-				audioElement?.play().catch(logAutoplayError);
-			}, 50);
-
-			return () => clearTimeout(timeout);
-		}
-
-		audioElement.pause();
+		const initAudio = async () => {
+			await NativeAudio.configure({
+				showNotification: true,
+				background: true
+			});
+		};
+		initAudio();
 	});
 
-    /** @param {Event} [e] */
-    function togglePlay(e) {
-        if (e) e.stopPropagation();
-        $isPlaying = !$isPlaying;
-    }
+	// 2. The Core Playback Engine
+	async function playNativeTrack(track: any) {
+		if (!track || !track.audioUrl) return;
 
-    /**
-     * @param {number} seconds
-     * @param {Event} [e]
-     */
-    function skipTime(seconds, e) {
-        if (e) e.stopPropagation();
-        if (audioElement) {
-            audioElement.currentTime += seconds;
-        }
-    }
+		try {
+			await NativeAudio.stop({ assetId: 'currentTrack' });
+		} catch (e) { /* Ignore */ }
 
-    /** @param {Event} [e] */
-    function playNext(e) {
-        if (e) e.stopPropagation();
-        if ($playlistQueue && $playlistQueue.length > 0) {
-            let nextIndex = $currentTrackIndex + 1;
-            if (nextIndex >= $playlistQueue.length) nextIndex = 0;
+		try {
+			await NativeAudio.preload({
+				assetId: 'currentTrack',
+				assetPath: track.audioUrl,
+				isUrl: true, 
+				notificationMetadata: {
+					title: track.title,
+					artist: track.artist,
+					artworkUrl: track.image
+				}
+			});
 
-            $currentTrackIndex = nextIndex;
-            let nextTrack = $playlistQueue[nextIndex];
+			await NativeAudio.play({ assetId: 'currentTrack' });
+			
+			// Get duration once it's loaded
+			const dur = await NativeAudio.getDuration({ assetId: 'currentTrack' });
+			duration = dur.duration;
+			$isPlaying = true;
+			
+			startTrackingTime();
+		} catch (error) {
+			console.error("Native Playback Error:", error);
+		}
+	}
 
-            $currentSong = {
-                title: nextTrack.title,
-                artist: nextTrack.artist || 'SyncU Curated',
-                coverArt: nextTrack.image,
-                audioUrl: nextTrack.audioUrl
-            };
-            $isPlaying = true;
-        }
-    }
+	// 3. Watch for Song Changes
+	// This replaces the old audio bind:src logic
+	$effect(() => {
+		const initAudio = async () => {
+			await NativeAudio.configure({
+				showNotification: true,
+				backgroundPlayback: true // FIXED: Updated flag name
+			});
+		};
+		initAudio();
+	});
 
-    /** @param {Event} [e] */
-    function playPrevious(e) {
-        if (e) e.stopPropagation();
-        if ($playlistQueue && $playlistQueue.length > 0) {
-            if (currentTime > 3 && audioElement) {
-                audioElement.currentTime = 0;
-                return;
-            }
+	// 4. Progress Bar Syncing
+	function startTrackingTime() {
+		clearInterval(timeInterval);
+		timeInterval = setInterval(async () => {
+			if ($isPlaying) {
+				try {
+					const time = await NativeAudio.getCurrentTime({ assetId: 'currentTrack' });
+					currentTime = time.currentTime;
+					
+					// Auto-play next if song ends (assuming within 1 sec of end)
+					if (duration > 0 && currentTime >= duration - 1) {
+						playNext();
+					}
+				} catch (e) { /* Ignore */ }
+			}
+		}, 1000);
+	}
 
-            let prevIndex = $currentTrackIndex - 1;
-            if (prevIndex < 0) prevIndex = $playlistQueue.length - 1;
+	onDestroy(() => {
+		clearInterval(timeInterval);
+	});
 
-            $currentTrackIndex = prevIndex;
-            let prevTrack = $playlistQueue[prevIndex];
+	// 5. Rewired UI Controls
+	async function togglePlay(e?: Event) {
+		if (e) e.stopPropagation();
+		
+		try {
+			if ($isPlaying) {
+				await NativeAudio.pause({ assetId: 'currentTrack' });
+			} else {
+				await NativeAudio.play({ assetId: 'currentTrack' });
+			}
+			$isPlaying = !$isPlaying;
+		} catch (error) {
+			console.error("Toggle Error", error);
+		}
+	}
 
-            $currentSong = {
-                title: prevTrack.title,
-                artist: prevTrack.artist || 'SyncU Curated',
-                coverArt: prevTrack.image,
-                audioUrl: prevTrack.audioUrl
-            };
-            $isPlaying = true;
-        }
-    }
+	async function skipTime(seconds: number, e?: Event) {
+		if (e) e.stopPropagation();
+		try {
+			const newTime = Math.max(0, Math.min(currentTime + seconds, duration));
+			await NativeAudio.setCurrentTime({ assetId: 'currentTrack', time: newTime });
+			currentTime = newTime;
+		} catch (error) {
+			console.error("Seek Error", error);
+		}
+	}
 
-    /** @param {number} seconds */
-    function formatTime(seconds) {
-        if (isNaN(seconds)) return '0:00';
-        const m = Math.floor(seconds / 60);
-        const s = Math.floor(seconds % 60);
-        return `${m}:${s < 10 ? '0' : ''}${s}`;
-    }
+	function playNext(e?: Event) {
+		if (e) e.stopPropagation();
+		if ($playlistQueue && $playlistQueue.length > 0) {
+			let nextIndex = $currentTrackIndex + 1;
+			if (nextIndex >= $playlistQueue.length) nextIndex = 0;
+
+			$currentTrackIndex = nextIndex;
+			let nextTrack = $playlistQueue[nextIndex];
+
+			$currentSong = {
+				title: nextTrack.title,
+				artist: nextTrack.artist || 'SyncU Curated',
+				coverArt: nextTrack.image,
+				audioUrl: nextTrack.audioUrl
+			};
+		}
+	}
+
+	function playPrevious(e?: Event) {
+		if (e) e.stopPropagation();
+		if ($playlistQueue && $playlistQueue.length > 0) {
+			if (currentTime > 3) {
+				skipTime(-currentTime); // Seek to start
+				return;
+			}
+
+			let prevIndex = $currentTrackIndex - 1;
+			if (prevIndex < 0) prevIndex = $playlistQueue.length - 1;
+
+			$currentTrackIndex = prevIndex;
+			let prevTrack = $playlistQueue[prevIndex];
+
+			$currentSong = {
+				title: prevTrack.title,
+				artist: prevTrack.artist || 'SyncU Curated',
+				coverArt: prevTrack.image,
+				audioUrl: prevTrack.audioUrl
+			};
+		}
+	}
+
+	function formatTime(seconds: number) {
+		if (isNaN(seconds)) return '0:00';
+		const m = Math.floor(seconds / 60);
+		const s = Math.floor(seconds % 60);
+		return `${m}:${s < 10 ? '0' : ''}${s}`;
+	}
 </script>
 
-<audio
-    bind:this={audioElement}
-    src={$currentSong?.audioUrl}
-    bind:currentTime={currentTime}
-    bind:duration={duration}
-    onloadedmetadata={() => (duration = audioElement?.duration ?? duration)}
-    ontimeupdate={() => (currentTime = audioElement?.currentTime ?? currentTime)}
-    onended={() => playNext()}
-></audio>
-
 <div class="h-[100dvh] w-full flex flex-col relative bg-zinc-950 text-zinc-50 antialiased selection:bg-zinc-800">
-    <main class="flex-1 overflow-y-auto pb-28 no-scrollbar">
-        {@render children()}
-    </main>
+	<main class="flex-1 overflow-y-auto pb-28 no-scrollbar">
+		{@render children()}
+	</main>
 
-    <div
-        class="absolute bottom-4 left-4 right-4 h-20 bg-zinc-900/80 backdrop-blur-xl border border-zinc-800/40 rounded-2xl flex items-center justify-between px-4 sm:px-6 shadow-2xl z-40 transition-transform cursor-pointer hover:bg-zinc-800/80 overflow-hidden"
-        role="button"
-        tabindex="0"
-        onclick={() => (isFullScreen = true)}
-        onkeydown={(e) => e.key === 'Enter' && (isFullScreen = true)}
-    >
-        <div class="absolute top-0 left-0 right-0 h-[2px] bg-zinc-800/50">
-            <div
-                class="h-full bg-white transition-all duration-75 ease-linear shadow-[0_0_8px_rgba(255,255,255,0.8)]"
-                style="width: {Math.min((currentTime / duration) * 100 || 0, 100)}%"
-            ></div>
-        </div>
+	<div
+		class="absolute bottom-4 left-4 right-4 h-20 bg-zinc-900/80 backdrop-blur-xl border border-zinc-800/40 rounded-2xl flex items-center justify-between px-4 sm:px-6 shadow-2xl z-40 transition-transform cursor-pointer hover:bg-zinc-800/80 overflow-hidden"
+		role="button"
+		tabindex="0"
+		onclick={() => (isFullScreen = true)}
+		onkeydown={(e) => e.key === 'Enter' && (isFullScreen = true)}
+	>
+		<div class="absolute top-0 left-0 right-0 h-[2px] bg-zinc-800/50">
+			<div
+				class="h-full bg-white transition-all duration-75 ease-linear shadow-[0_0_8px_rgba(255,255,255,0.8)]"
+				style="width: {Math.min((currentTime / duration) * 100 || 0, 100)}%"
+			></div>
+		</div>
 
-        <div class="flex items-center gap-3 w-7/12 sm:w-5/12 min-w-0 pt-1">
-            <img src={$currentSong?.coverArt} alt="Album Art" class="w-12 h-12 rounded-xl shadow-md object-cover" />
-            <div class="flex flex-col min-w-0">
-                <span class="text-sm font-medium text-zinc-100 truncate">{$currentSong?.title}</span>
-                <span class="text-xs text-zinc-400 truncate">{$currentSong?.artist}</span>
-            </div>
-        </div>
+		<div class="flex items-center gap-3 w-7/12 sm:w-5/12 min-w-0 pt-1">
+			<img src={$currentSong?.coverArt} alt="Album Art" class="w-12 h-12 rounded-xl shadow-md object-cover" />
+			<div class="flex flex-col min-w-0">
+				<span class="text-sm font-medium text-zinc-100 truncate">{$currentSong?.title}</span>
+				<span class="text-xs text-zinc-400 truncate">{$currentSong?.artist}</span>
+			</div>
+		</div>
 
-        <div class="flex items-center justify-end gap-4 w-5/12 pt-1">
-            <button onclick={(e) => playNext(e)} aria-label="Next Track" class="p-2 text-zinc-400 hover:text-white transition active:scale-90 hidden sm:block">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="currentColor" viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
-            </button>
+		<div class="flex items-center justify-end gap-4 w-5/12 pt-1">
+			<button onclick={(e) => playNext(e)} aria-label="Next Track" class="p-2 text-zinc-400 hover:text-white transition active:scale-90 hidden sm:block">
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="currentColor" viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+			</button>
 
-            <button onclick={togglePlay} aria-label={$isPlaying ? 'Pause' : 'Play'} class="w-12 h-12 flex items-center justify-center rounded-full bg-zinc-50 text-zinc-950 hover:bg-white active:scale-95 transition-all">
-                {#if $isPlaying}
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 fill-current" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
-                {:else}
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 fill-current translate-x-[1px]" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                {/if}
-            </button>
-        </div>
-    </div>
+			<button onclick={togglePlay} aria-label={$isPlaying ? 'Pause' : 'Play'} class="w-12 h-12 flex items-center justify-center rounded-full bg-zinc-50 text-zinc-950 hover:bg-white active:scale-95 transition-all">
+				{#if $isPlaying}
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 fill-current" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+				{:else}
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 fill-current translate-x-[1px]" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+				{/if}
+			</button>
+		</div>
+	</div>
 </div>
 
 <div
-    class={ "fixed inset-0 z-[100] bg-zinc-950 flex flex-col overflow-y-auto overscroll-contain no-scrollbar transition-transform duration-500 ease-in-out " + (isFullScreen ? 'translate-y-0' : 'translate-y-full') }
+	class={ "fixed inset-0 z-[100] bg-zinc-950 flex flex-col overflow-y-auto overscroll-contain no-scrollbar transition-transform duration-500 ease-in-out " + (isFullScreen ? 'translate-y-0' : 'translate-y-full') }
 >
-    <div class="sticky top-0 z-10 flex flex-shrink-0 items-center justify-between bg-zinc-950/90 px-6 pt-12 pb-4 backdrop-blur">
-        <button onclick={() => (isFullScreen = false)} aria-label="Close Full Screen" class="p-2 -ml-2 text-zinc-400 hover:text-white transition rounded-full hover:bg-zinc-800/50">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
-        </button>
-        <span class="text-xs font-bold tracking-widest text-zinc-500 uppercase">Now Playing</span>
-        <div class="w-8"></div>
-    </div>
+	<div class="sticky top-0 z-10 flex flex-shrink-0 items-center justify-between bg-zinc-950/90 px-6 pt-12 pb-4 backdrop-blur">
+		<button onclick={() => (isFullScreen = false)} aria-label="Close Full Screen" class="p-2 -ml-2 text-zinc-400 hover:text-white transition rounded-full hover:bg-zinc-800/50">
+			<svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
+		</button>
+		<span class="text-xs font-bold tracking-widest text-zinc-500 uppercase">Now Playing</span>
+		<div class="w-8"></div>
+	</div>
 
-    <div class="flex min-h-fit flex-col items-center px-8 pt-4 pb-14 sm:flex-1 sm:justify-center">
-        <img src={$currentSong?.coverArt} alt="Album Art" class="w-full max-w-[350px] aspect-square rounded-3xl shadow-2xl object-cover mb-10" />
+	<div class="flex min-h-fit flex-col items-center px-8 pt-4 pb-14 sm:flex-1 sm:justify-center">
+		<img src={$currentSong?.coverArt} alt="Album Art" class="w-full max-w-[350px] aspect-square rounded-3xl shadow-2xl object-cover mb-10" />
 
-        <div class="w-full max-w-[350px] flex flex-col items-start mb-7">
-            <h2 class="text-3xl font-bold text-white truncate w-full">{$currentSong?.title}</h2>
-            <p class="text-lg text-zinc-400 truncate w-full mt-1">{$currentSong?.artist}</p>
-        </div>
+		<div class="w-full max-w-[350px] flex flex-col items-start mb-7">
+			<h2 class="text-3xl font-bold text-white truncate w-full">{$currentSong?.title}</h2>
+			<p class="text-lg text-zinc-400 truncate w-full mt-1">{$currentSong?.artist}</p>
+		</div>
 
-        <div class="w-full max-w-[350px] mb-8">
-            <div class="h-1.5 w-full bg-zinc-800 rounded-full overflow-hidden mb-3">
-                <div class="h-full bg-white rounded-full relative" style="width: {Math.min((currentTime / duration) * 100 || 0, 100)}%"></div>
-            </div>
-            <div class="flex justify-between text-xs text-zinc-500 font-medium">
-                <span>{formatTime(currentTime)}</span>
-                <span>{formatTime(duration)}</span>
-            </div>
-        </div>
+		<div class="w-full max-w-[350px] mb-8">
+			<div class="h-1.5 w-full bg-zinc-800 rounded-full overflow-hidden mb-3">
+				<div class="h-full bg-white rounded-full relative" style="width: {Math.min((currentTime / duration) * 100 || 0, 100)}%"></div>
+			</div>
+			<div class="flex justify-between text-xs text-zinc-500 font-medium">
+				<span>{formatTime(currentTime)}</span>
+				<span>{formatTime(duration)}</span>
+			</div>
+		</div>
 
-        <div class="w-full max-w-[350px] flex flex-shrink-0 items-center justify-between">
-            <button onclick={(e) => skipTime(-5, e)} aria-label="Rewind 5 Seconds" class="text-zinc-400 hover:text-white transition active:scale-90">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0019 16V8a1 1 0 00-1.6-.8l-5.333 4zM4.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0011 16V8a1 1 0 00-1.6-.8l-5.334 4z" /></svg>
-            </button>
+		<div class="w-full max-w-[350px] flex flex-shrink-0 items-center justify-between">
+			<button onclick={(e) => skipTime(-5, e)} aria-label="Rewind 5 Seconds" class="text-zinc-400 hover:text-white transition active:scale-90">
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0019 16V8a1 1 0 00-1.6-.8l-5.333 4zM4.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0011 16V8a1 1 0 00-1.6-.8l-5.334 4z" /></svg>
+			</button>
 
-            <button onclick={(e) => playPrevious(e)} aria-label="Previous Track" class="text-zinc-100 hover:text-zinc-300 transition active:scale-90">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-10 w-10" fill="currentColor" viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
-            </button>
+			<button onclick={(e) => playPrevious(e)} aria-label="Previous Track" class="text-zinc-100 hover:text-zinc-300 transition active:scale-90">
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-10 w-10" fill="currentColor" viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
+			</button>
 
-            <button onclick={togglePlay} aria-label={$isPlaying ? 'Pause' : 'Play'} class="w-20 h-20 flex items-center justify-center rounded-full bg-white text-black active:scale-95 transition-transform shadow-[0_0_40px_rgba(255,255,255,0.2)]">
-                {#if $isPlaying}
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
-                {:else}
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 translate-x-[2px]" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                {/if}
-            </button>
+			<button onclick={togglePlay} aria-label={$isPlaying ? 'Pause' : 'Play'} class="w-20 h-20 flex items-center justify-center rounded-full bg-white text-black active:scale-95 transition-transform shadow-[0_0_40px_rgba(255,255,255,0.2)]">
+				{#if $isPlaying}
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+				{:else}
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 translate-x-[2px]" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+				{/if}
+			</button>
 
-            <button onclick={(e) => playNext(e)} aria-label="Next Track" class="text-zinc-100 hover:text-zinc-300 transition active:scale-90">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-10 w-10" fill="currentColor" viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
-            </button>
+			<button onclick={(e) => playNext(e)} aria-label="Next Track" class="text-zinc-100 hover:text-zinc-300 transition active:scale-90">
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-10 w-10" fill="currentColor" viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+			</button>
 
-            <button onclick={(e) => skipTime(5, e)} aria-label="Fast Forward 5 Seconds" class="text-zinc-400 hover:text-white transition active:scale-90">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11.933 12.8a1 1 0 000-1.6l-5.333-4A1 1 0 005 8v8a1 1 0 001.6.8l5.333-4zM19.933 12.8a1 1 0 000-1.6l-5.334-4A1 1 0 0013 8v8a1 1 0 001.6.8l5.334-4z" /></svg>
-            </button>
-        </div>
-    </div>
+			<button onclick={(e) => skipTime(5, e)} aria-label="Fast Forward 5 Seconds" class="text-zinc-400 hover:text-white transition active:scale-90">
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11.933 12.8a1 1 0 000-1.6l-5.333-4A1 1 0 005 8v8a1 1 0 001.6.8l5.333-4zM19.933 12.8a1 1 0 000-1.6l-5.334-4A1 1 0 0013 8v8a1 1 0 001.6.8l5.334-4z" /></svg>
+			</button>
+		</div>
+	</div>
 </div>
 
 <style>
-    :global(html), :global(body) { margin: 0; padding: 0; background-color: #09090b; }
-    .no-scrollbar::-webkit-scrollbar { display: none; }
-    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+	:global(html), :global(body) { margin: 0; padding: 0; background-color: #09090b; }
+	.no-scrollbar::-webkit-scrollbar { display: none; }
+	.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 </style>
