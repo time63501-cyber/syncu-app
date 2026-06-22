@@ -1,68 +1,52 @@
-<script>
+<script lang="ts">
 	import { onMount } from 'svelte';
-    import { isPlaying, currentSong, currentMood, playlistQueue, currentTrackIndex } from '$lib/stores';
-	
-    // Use $state() for variables that update dynamically
-	let greeting = $state("Hello");
-	let timeOfDay = $state("morning");
-	/** @type {import('$lib/stores').PlaylistItem[]} */
-	let suggestions = $state([]);
-	
-	onMount(async () => {
-		const hour = new Date().getHours();
-		if (hour < 12) { greeting = "Good morning"; timeOfDay = "morning"; }
-		else if (hour < 18) { greeting = "Good afternoon"; timeOfDay = "afternoon"; }
-		else { greeting = "Good evening"; timeOfDay = "evening"; }
+	import { isPlaying, currentSong, playlistQueue, currentTrackIndex } from '$lib/stores';
 
-		// As soon as the app loads, ask Python for music!
-		// For now, we will pass a default context. Later, we'll use the real weather/mood.
-		await fetchRecommendations(timeOfDay, "Relaxing", "Bright");
-	});
+	let currentAtmosphere = $state("Syncing with your environment...");
+	let isLoading = $state(true);
+	let categories = $state<any[]>([]); // Array of category rows (Trending, Vibe, Fresh Finds)
 
-	// The Bridge: This function talks to your Python backend
-	/**
-	 * @param {string} time
-	 * @param {string} activity
-	 * @param {string} atmosphere
-	 */
-	async function fetchRecommendations(time, activity, atmosphere) {
+	// Ping Python for the default discovery dashboard
+	async function fetchRecommendations() {
+		isLoading = true;
 		try {
-			const response = await fetch("http://localhost:8000/api/recommend", {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
+			const response = await fetch('http://127.0.0.1:8000/api/recommend', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
-					time_of_day: time,
-					activity: activity,
-					atmosphere: atmosphere
+					user_id: "test_user_1",
+					city: "Proddatur", 
+					manual_mood: null // Home screen always requests the multi-row discovery array
 				})
 			});
 
 			if (response.ok) {
 				const data = await response.json();
-				suggestions = data.playlist; // Update the UI with Python's data
+				currentAtmosphere = data.atmosphere; 
+				categories = data.categories; 
 			}
 		} catch (error) {
-			console.error("Brain disconnected! Is the Python server running?", error);
+			console.error("Backend connection failed:", error);
+		} finally {
+			isLoading = false;
 		}
 	}
 
-	// Keep your existing mood categories
-	const moods = [
-		{ id: 1, name: "Deep Focus", icon: "🧠" },
-		{ id: 2, name: "Relax & Unwind", icon: "☕" },
-		{ id: 3, name: "High Energy", icon: "⚡" },
-		{ id: 4, name: "Late Night Drive", icon: "🌙" },
-		{ id: 5, name: "Melancholy", icon: "🌧️" }
-	];
+	onMount(() => {
+		fetchRecommendations(); 
+	});
 
-	// 2. Update playTrack to accept the index and load the queue
-	/**
-	 * @param {import('$lib/stores').PlaylistItem} playlist
-	 * @param {number} index
-	 */
-	function playTrack(playlist, index) {
-		$playlistQueue = suggestions; // Load the whole grid into the queue
-		$currentTrackIndex = index;   // Set our current position
+	function playTrack(playlist: any, categoryTracks: any[]) {
+		if (!playlist.is_available) {
+			alert("This track is not yet hosted on the SyncU server.");
+			return;
+		}
+
+		const availableTracks = categoryTracks.filter(t => t.is_available);
+		const newIndex = availableTracks.findIndex(t => t.id === playlist.id);
+
+		$playlistQueue = availableTracks;
+		$currentTrackIndex = newIndex;
 		
 		$currentSong = {
 			title: playlist.title,
@@ -72,108 +56,78 @@
 		};
 		$isPlaying = true;
 	}
-
-	/** @param {string} moodName */
-	function selectMood(moodName) {
-		$currentMood = moodName;
-		
-		// Map the UI mood to the backend activity to get fresh recommendations instantly
-		let mappedActivity = "Relaxing";
-		if (moodName === "Deep Focus") mappedActivity = "Deep Work";
-		if (moodName === "High Energy" || moodName === "Late Night Drive") mappedActivity = "Moving";
-		
-		fetchRecommendations(timeOfDay, mappedActivity, "Bright");
-	}
 </script>
 
-<div class="px-4 sm:px-6 pt-12 pb-8 animate-fade-in">
-	
-	<header class="flex items-center justify-between mb-8">
-		<div>
-			<h1 class="text-3xl font-bold tracking-tight text-white">{greeting}.</h1>
-			<p class="text-zinc-400 mt-1 text-sm">Syncing with your environment...</p>
-		</div>
-		
-		<a href="/mood" aria-label="Open Mood Profiler" class="relative group">
-			<div class="absolute -inset-1 bg-white/20 rounded-full blur-sm opacity-0 group-hover:opacity-100 transition duration-300"></div>
-			
-			<button aria-label="Action" class="relative w-10 h-10 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center group-hover:bg-zinc-700 transition active:scale-95">
-				<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-zinc-300" viewBox="0 0 20 20" fill="currentColor">
-					<path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd" />
-				</svg>
-			</button>
-		</a>
+<div class="px-6 py-8 pb-32">
+	<header class="mb-10">
+		<h1 class="text-4xl font-extrabold tracking-tight text-white mb-1">Good evening.</h1>
+		<p class="text-sm font-medium text-zinc-400 flex items-center gap-2">
+			{#if isLoading}
+				<span class="w-3 h-3 rounded-full bg-emerald-500 animate-pulse"></span>
+			{/if}
+			{currentAtmosphere}
+		</p>
 	</header>
 
-	<section class="mb-10">
-		<h2 class="text-lg font-semibold text-zinc-100 mb-4">How are you feeling right now?</h2>
-		
-		<div class="flex overflow-x-auto gap-3 pb-2 no-scrollbar -mx-4 px-4 sm:mx-0 sm:px-0">
-			{#each moods as mood}
-				<button aria-label="Action" 
-					onclick={() => selectMood(mood.name)}
-					class="flex-shrink-0 flex items-center gap-2 px-5 py-2.5 rounded-full border transition-all active:scale-95 
-					{$currentMood === mood.name ? 'bg-white text-black border-white' : 'bg-zinc-900 border-zinc-800 text-zinc-200 hover:bg-zinc-800 hover:border-zinc-700'}"
-				>
-					<span class="text-lg">{mood.icon}</span>
-					<span class="text-sm font-medium { $currentMood === mood.name ? 'text-black font-bold' : 'text-zinc-200' }">{mood.name}</span>
-				</button>
+	{#if isLoading}
+		<div class="flex items-center justify-center py-12">
+			<p class="text-zinc-500 animate-pulse font-medium tracking-wide">Syncing Library...</p>
+		</div>
+	{:else}
+		<div class="flex flex-col gap-10">
+			{#each categories as category}
+				<section>
+					<h2 class="text-xl font-bold text-zinc-100 mb-6">{category.title}</h2>
+					
+					<div class="flex gap-4 overflow-x-auto pb-4 no-scrollbar -mx-6 px-6 snap-x">
+						{#each category.tracks as playlist}
+							<div 
+								class="group w-36 sm:w-40 flex-shrink-0 snap-start flex flex-col gap-2 {playlist.is_available ? 'cursor-pointer' : 'cursor-not-allowed opacity-75'}" 
+								role="button"
+								tabindex="0"
+								onclick={() => playTrack(playlist, category.tracks)} 
+								onkeydown={(e) => e.key === 'Enter' && playTrack(playlist, category.tracks)} 
+							>
+								<div class="relative w-full aspect-square rounded-xl overflow-hidden shadow-md bg-zinc-900">
+									<img src={playlist.image} alt={playlist.title} class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
+									
+									{#if playlist.is_available}
+										<div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+											<button aria-label="Play {playlist.title}" class="w-12 h-12 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center shadow-lg hover:bg-white hover:text-black transition-all text-white">
+												<svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 translate-x-[1px]" viewBox="0 0 24 24" fill="currentColor">
+													<path d="M8 5v14l11-7z"/>
+												</svg>
+											</button>
+										</div>
+									{:else}
+										<div class="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+											<svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+											  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+											</svg>
+										</div>
+									{/if}
+								</div>
+								
+								<div class="flex flex-col">
+									<div class="flex items-center gap-2">
+										<span class="text-sm font-semibold text-zinc-100 truncate" title={playlist.title}>{@html playlist.title}</span>
+										
+										{#if playlist.is_available}
+											<div class="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)] flex-shrink-0" title="Available on Server"></div>
+										{/if}
+									</div>
+									<span class="text-[10px] font-medium text-zinc-400 mt-0.5 truncate" title={playlist.artist}>{@html playlist.artist}</span>
+								</div>
+							</div>
+						{/each}
+					</div>
+				</section>
 			{/each}
 		</div>
-	</section>
-
-	<section>
-		<h2 class="text-lg font-semibold text-zinc-100 mb-4">Curated for your atmosphere</h2>
-		
-		<div class="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-			{#each suggestions as playlist, index}
-				<div 
-					class="group cursor-pointer flex flex-col gap-2" 
-					role="button"
-					tabindex="0"
-					onclick={() => playTrack(playlist, index)} 
-					onkeydown={(e) => e.key === 'Enter' && playTrack(playlist, index)} 
-				>
-					
-					<div class="relative w-full aspect-square rounded-xl overflow-hidden shadow-md">
-						<img src={playlist.image} alt={playlist.title} class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
-						
-						<div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-							<button aria-label="Play {playlist.title}" class="w-12 h-12 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center shadow-lg hover:bg-white hover:text-black transition-all text-white">
-								<svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 translate-x-[1px]" viewBox="0 0 24 24" fill="currentColor">
-									<path d="M8 5v14l11-7z"/>
-								</svg>
-							</button>
-						</div>
-					</div>
-					
-					<div class="flex flex-col">
-						<span class="text-sm font-semibold text-zinc-100 truncate">{playlist.title}</span>
-						<span class="text-[11px] text-emerald-500 mt-0.5 truncate">{playlist.context}</span>
-					</div>
-				</div>
-			{/each}
-		</div>
-	</section>
-
+	{/if}
 </div>
 
 <style>
-	/* Ensures horizontal scrollbars don't ruin the mobile UI */
-	.no-scrollbar::-webkit-scrollbar {
-		display: none;
-	}
-	.no-scrollbar {
-		-ms-overflow-style: none;
-		scrollbar-width: none;
-	}
-	
-	/* Simple fade-in animation for a premium feel on load */
-	.animate-fade-in {
-		animation: fadeIn 0.5s ease-out forwards;
-	}
-	@keyframes fadeIn {
-		from { opacity: 0; transform: translateY(10px); }
-		to { opacity: 1; transform: translateY(0); }
-	}
+	.no-scrollbar::-webkit-scrollbar { display: none; }
+	.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 </style>

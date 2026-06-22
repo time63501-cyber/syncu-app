@@ -1,9 +1,11 @@
 <script>
 	import '../app.css';
-	import { isPlaying, currentSong, playlistQueue, currentTrackIndex } from '$lib/stores';
-	import { NativeAudio } from '@capgo/native-audio';
-	import { MediaSession } from '@capgo/capacitor-media-session';
-	import { onDestroy } from 'svelte';
+    import { isPlaying, currentSong, playlistQueue, currentTrackIndex } from '$lib/stores';
+    import { NativeAudio } from '@capgo/native-audio';
+    import { MediaSession } from '@capgo/capacitor-media-session';
+    import { onDestroy } from 'svelte';
+    import { Capacitor } from '@capacitor/core';
+    import { page } from '$app/stores'; // <-- ADD THIS
 
 	let { children } = $props();
 
@@ -14,14 +16,13 @@
 
 	// 1. Initialize the Native Plugin
 	$effect(() => {
-		const initAudio = async () => {
-			await NativeAudio.configure({
-				showNotification: true,
-				backgroundPlayback: true // Fixed flag for background audio
-			});
-		};
-		initAudio();
-	});
+    if (Capacitor.isNativePlatform()) {
+        const initAudio = async () => {
+            await NativeAudio.configure({ showNotification: true, backgroundPlayback: true });
+        };
+        initAudio();
+    }
+});
 
 	// 2. The Core Playback Engine (No TS Types here!)
 	async function playNativeTrack(track) {
@@ -163,46 +164,61 @@
 </script>
 
 <div class="h-[100dvh] w-full flex flex-col relative bg-zinc-950 text-zinc-50 antialiased selection:bg-zinc-800">
-	<main class="flex-1 overflow-y-auto pb-28 no-scrollbar">
-		{@render children()}
+	<main class="flex-1 overflow-y-auto pb-40 no-scrollbar"> {@render children()}
 	</main>
 
 	<div
-		class="absolute bottom-4 left-4 right-4 h-20 bg-zinc-900/80 backdrop-blur-xl border border-zinc-800/40 rounded-2xl flex items-center justify-between px-4 sm:px-6 shadow-2xl z-40 transition-transform cursor-pointer hover:bg-zinc-800/80 overflow-hidden"
+		class="fixed bottom-[5.5rem] left-4 right-4 h-16 bg-zinc-900/95 backdrop-blur-xl border border-zinc-800/60 rounded-xl flex items-center justify-between px-4 shadow-2xl z-40 transition-transform cursor-pointer hover:bg-zinc-800/80 overflow-hidden"
 		role="button"
 		tabindex="0"
 		onclick={() => (isFullScreen = true)}
 		onkeydown={(e) => e.key === 'Enter' && (isFullScreen = true)}
 	>
-		<div class="absolute top-0 left-0 right-0 h-[2px] bg-zinc-800/50">
-			<div
-				class="h-full bg-white transition-all duration-75 ease-linear shadow-[0_0_8px_rgba(255,255,255,0.8)]"
-				style="width: {Math.min((currentTime / duration) * 100 || 0, 100)}%"
-			></div>
+		<div class="absolute bottom-0 left-0 right-0 h-[2px] bg-zinc-800">
+			<div class="h-full bg-white transition-all duration-75 ease-linear" style="width: {Math.min((currentTime / duration) * 100 || 0, 100)}%"></div>
 		</div>
 
-		<div class="flex items-center gap-3 w-7/12 sm:w-5/12 min-w-0 pt-1">
-			<img src={$currentSong?.coverArt} alt="Album Art" class="w-12 h-12 rounded-xl shadow-md object-cover" />
+		<div class="flex items-center gap-3 w-7/12 min-w-0">
+			<img src={$currentSong?.coverArt} alt="Album Art" class="w-10 h-10 rounded-md shadow-md object-cover" />
 			<div class="flex flex-col min-w-0">
-				<span class="text-sm font-medium text-zinc-100 truncate">{$currentSong?.title}</span>
+				<span class="text-sm font-semibold text-white truncate">{$currentSong?.title}</span>
 				<span class="text-xs text-zinc-400 truncate">{$currentSong?.artist}</span>
 			</div>
 		</div>
 
-		<div class="flex items-center justify-end gap-4 w-5/12 pt-1">
-			<button onclick={(e) => playNext(e)} aria-label="Next Track" class="p-2 text-zinc-400 hover:text-white transition active:scale-90 hidden sm:block">
-				<svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="currentColor" viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
-			</button>
-
-			<button onclick={togglePlay} aria-label={$isPlaying ? 'Pause' : 'Play'} class="w-12 h-12 flex items-center justify-center rounded-full bg-zinc-50 text-zinc-950 hover:bg-white active:scale-95 transition-all">
+		<div class="flex items-center justify-end gap-3 w-5/12">
+			<button onclick={togglePlay} aria-label={$isPlaying ? 'Pause' : 'Play'} class="p-2 text-white active:scale-95 transition-all">
 				{#if $isPlaying}
-					<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 fill-current" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 fill-current" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
 				{:else}
-					<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 fill-current translate-x-[1px]" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 fill-current translate-x-[1px]" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
 				{/if}
 			</button>
 		</div>
 	</div>
+
+	<nav class="fixed bottom-0 left-0 right-0 h-20 bg-zinc-950/90 backdrop-blur-xl border-t border-zinc-900 flex items-center justify-around px-2 z-50 pb-2">
+		<a href="/" class="flex flex-col items-center gap-1.5 p-2 transition-colors {$page.url.pathname === '/' ? 'text-white' : 'text-zinc-500 hover:text-zinc-300'}">
+			<svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="{$page.url.pathname === '/' ? 'currentColor' : 'none'}" viewBox="0 0 24 24" stroke="currentColor" stroke-width="{$page.url.pathname === '/' ? '0' : '1.5'}">
+				<path stroke-linecap="round" stroke-linejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+			</svg>
+			<span class="text-[10px] font-medium tracking-wide">Home</span>
+		</a>
+
+		<a href="/mood" class="flex flex-col items-center gap-1.5 p-2 transition-colors {$page.url.pathname === '/mood' ? 'text-white' : 'text-zinc-500 hover:text-zinc-300'}">
+			<svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="{$page.url.pathname === '/mood' ? 'currentColor' : 'none'}" viewBox="0 0 24 24" stroke="currentColor" stroke-width="{$page.url.pathname === '/mood' ? '0' : '1.5'}">
+				<path stroke-linecap="round" stroke-linejoin="round" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+			</svg>
+			<span class="text-[10px] font-medium tracking-wide">Mood Vault</span>
+		</a>
+
+		<button class="flex flex-col items-center gap-1.5 p-2 transition-colors text-zinc-600 cursor-not-allowed">
+			<svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+				<path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+			</svg>
+			<span class="text-[10px] font-medium tracking-wide">Search</span>
+		</button>
+	</nav>
 </div>
 
 <div
